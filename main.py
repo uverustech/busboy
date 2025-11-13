@@ -7,44 +7,47 @@ from starlette.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 import uvicorn
 import json
+from urllib.parse import parse_qs, urlparse
 
-# Load environment variables
 load_dotenv()
 PORT = int(os.getenv("PORT", 8000))
 
 async def echo_handler(request: Request):
-    # Parse URL components
-    raw_path = request.url.path
-    query_string = str(request.url.query)
-    query_params = request.query_params
+    # --- URL & Query Parsing (like stdlib) ---
+    full_url = str(request.url)
+    parsed_url = urlparse(full_url)
+    raw_path = parsed_url.path
+    query_string = parsed_url.query
 
-    # Simplify query params: unwrap single-item lists
-    simplified_query = {
-        k: v if len(v) > 1 else v[0] if v else ""
-        for k, v in query_params.lists()
+    # Parse query string with full list support
+    query_params_raw = parse_qs(query_string, keep_blank_values=True)
+    query_params = {
+        k: v if len(v) > 1 else v[0] for k, v in query_params_raw.items()
     }
 
-    # Read body
+    # --- Headers ---
+    headers = dict(request.headers)
+
+    # --- Body ---
     body_bytes = await request.body()
     body_str = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
     body_length = len(body_bytes)
 
-    # Try to parse JSON body
     body_json = None
     if body_bytes:
         try:
             body_json = json.loads(body_bytes)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            pass  # Not valid JSON
+            pass
 
-    # Build response data
+    # --- Response Data ---
     response_data = {
         "method": request.method,
-        "path": str(request.url),
+        "path": full_url,
         "raw_path": raw_path,
         "query_string": query_string,
-        "query_params": simplified_query,
-        "headers": dict(request.headers),
+        "query_params": query_params,
+        "headers": headers,
         "body_raw": body_str,
         "body_bytes_length": body_length,
     }
@@ -60,7 +63,7 @@ async def echo_handler(request: Request):
         }
     )
 
-# Create app with CORS middleware
+# App setup
 app = Starlette()
 app.add_middleware(
     CORSMiddleware,
@@ -69,7 +72,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Single route to catch all paths and methods
+# Catch-all route
 app.add_route("/{full_path:path}", echo_handler, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
 
 if __name__ == "__main__":
